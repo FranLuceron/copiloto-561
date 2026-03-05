@@ -5,6 +5,9 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
 import { Dashboard } from './components/Dashboard';
 import { Footer } from './components/Footer';
+import { History } from './pages/History';
+import { Simulation } from './pages/Simulation';
+import { AppLayout } from './layouts/AppLayout';
 
 // Subrutas que dependen de Auth para saber adónde redirigir la raíz ("/")
 const BaseRoute: React.FC = () => {
@@ -30,7 +33,31 @@ const App: React.FC = () => {
               path="/dashboard"
               element={
                 <ProtectedRoute>
-                  <Dashboard />
+                  <AppLayout>
+                    <Dashboard />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/history"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <History />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/simulation"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <Simulation />
+                  </AppLayout>
                 </ProtectedRoute>
               }
             />

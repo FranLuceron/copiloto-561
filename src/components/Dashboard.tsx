@@ -50,7 +50,6 @@ export const Dashboard: React.FC = () => {
     const currentActivity = useStore(state => state.currentActivity);
     const currentShiftState = useStore(state => state.currentShiftState);
     const addBlock = useStore(state => state.addBlock);
-    const stopCurrentActivity = useStore(state => state.stopCurrentActivity);
     const removeLastBlock = useStore(state => state.removeLastBlock);
     const hasActivities = useStore(state => state.activities.length > 0);
 
@@ -215,8 +214,8 @@ export const Dashboard: React.FC = () => {
             {/* Stop Action */}
             {currentActivity && (
                 <button
-                    onClick={stopCurrentActivity}
-                    aria-label="Finalizar Actividad Actual"
+                    onClick={() => useStore.getState().endShift(auth.currentUser?.uid as string)}
+                    aria-label="Finalizar Actividad Actual y Guardar Turno"
                     className="w-full bg-[#1A0A0A] border border-red-500/20 text-red-400 rounded-[20px] py-4 font-bold tracking-[0.2em] text-sm hover:bg-red-500/10 active:scale-95 transition-all outline-none mt-2 shadow-[0_0_15px_rgba(239,68,68,0.05)]"
                 >
                     FINALIZAR TURNO

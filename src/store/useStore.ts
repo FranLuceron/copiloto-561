@@ -9,6 +9,7 @@ interface CopilotState {
     addBlock: (type: ActivityType) => void;
     stopCurrentActivity: () => void;
     removeLastBlock: () => void;
+    endShift: (userId: string) => Promise<void>;
     setActivities: (activities: ActivitySegment[]) => void;
     setStatus: (status: ValidationResult) => void;
 }
@@ -80,6 +81,58 @@ export const useStore = create<CopilotState>((set, get) => ({
             activities: updatedActivities,
             currentActivity: newCurrentActivity
         });
+    },
+
+    endShift: async (userId: string) => {
+        const { activities, currentActivity, stopCurrentActivity } = get();
+        if (activities.length === 0) return;
+
+        if (currentActivity) {
+            stopCurrentActivity();
+        }
+
+        const finalActivities = get().activities;
+
+        let totalShiftMs = 0;
+        let drivingMs = 0;
+        let breakMs = 0;
+        let restMs = 0;
+        let workMs = 0;
+
+        if (finalActivities.length > 0) {
+            totalShiftMs = (finalActivities[finalActivities.length - 1].endTime || Date.now()) - finalActivities[0].startTime;
+        }
+
+        for (const act of finalActivities) {
+            const duration = (act.endTime || Date.now()) - act.startTime;
+            if (act.type === 'DRIVE') drivingMs += duration;
+            if (act.type === 'BREAK') breakMs += duration;
+            if (act.type === 'REST') restMs += duration;
+            if (act.type === 'WORK') workMs += duration;
+        }
+
+        const complianceStatus = get().currentShiftState?.compliance.status || 'OK';
+
+        try {
+            const { shiftService } = await import('../services/shiftService');
+            await shiftService.saveShift(userId, {
+                totalShiftMs,
+                drivingMs,
+                breakMs,
+                restMs,
+                workMs,
+                complianceStatus
+            });
+            // Una vez guardado el turno, reiniciamos el tacógrafo para el próximo día
+            set({
+                activities: [],
+                currentActivity: null,
+                currentShiftState: { compliance: { status: 'OK', message: 'Listo para conducir' } }
+            });
+        } catch (error) {
+            console.error('Error saving shift:', error);
+            // Podríamos implementar un fallback offline aquí, pero Firebase (IndexedDB) ya lo maneja si se usa onSnapshot. No obstante con addDoc internamente Firestore encola los writes.
+        }
     },
 
     setActivities: (activities) => set({ activities }),
