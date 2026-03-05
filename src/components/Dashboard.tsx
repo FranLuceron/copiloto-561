@@ -20,13 +20,17 @@ const HeaderClock: React.FC = () => {
 const ActivityTimer: React.FC = () => {
     const currentActivitySession = useStore(state => state.activities[state.activities.length - 1]);
     const currentActivity = useStore(state => state.currentActivity);
+    const checkCompliance = useStore(state => state.checkCompliance);
     const [now, setNow] = useState(Date.now());
 
     useEffect(() => {
         if (!currentActivity || (currentActivitySession && currentActivitySession.endTime)) return;
-        const timer = setInterval(() => setNow(Date.now()), 1000);
+        const timer = setInterval(() => {
+            setNow(Date.now());
+            checkCompliance();
+        }, 1000);
         return () => clearInterval(timer);
-    }, [currentActivity, currentActivitySession]);
+    }, [currentActivity, currentActivitySession, checkCompliance]);
 
     let currentTimerDisplay = "00:00:00";
     if (currentActivity && currentActivitySession && !currentActivitySession.endTime) {

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ActivityType, ActivitySegment, ValidationResult } from '../types';
+import { calculateContinuousDrive } from '../utils/rulesEngine';
 
 interface CopilotState {
     currentActivity: ActivityType | null;
@@ -10,6 +11,7 @@ interface CopilotState {
     stopCurrentActivity: () => void;
     removeLastBlock: () => void;
     endShift: (userId: string) => Promise<void>;
+    checkCompliance: () => void;
     setActivities: (activities: ActivitySegment[]) => void;
     setStatus: (status: ValidationResult) => void;
 }
@@ -132,6 +134,19 @@ export const useStore = create<CopilotState>((set, get) => ({
         } catch (error) {
             console.error('Error saving shift:', error);
             // Podríamos implementar un fallback offline aquí, pero Firebase (IndexedDB) ya lo maneja si se usa onSnapshot. No obstante con addDoc internamente Firestore encola los writes.
+        }
+    },
+
+    checkCompliance: () => {
+        const { currentActivity, activities, currentShiftState } = get();
+        // Solo verificamos proactivamente si está conduciendo o en pausa, que son los estados medibles por la ley 561 para avisos a corto plazo.
+        if (!currentActivity || activities.length === 0) return;
+
+        const result = calculateContinuousDrive(activities, Date.now());
+
+        // Evitamos renders infinitos comprobando si el estado ES DISTINTO al que ya teníamos.
+        if (currentShiftState?.compliance.status !== result.status || currentShiftState?.compliance.message !== result.message) {
+            set({ currentShiftState: { compliance: result } });
         }
     },
 
