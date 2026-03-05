@@ -1,6 +1,13 @@
 import React from 'react';
+import { useLocation } from 'react-router-dom';
 
 export const Footer: React.FC = () => {
+    const location = useLocation();
+
+    if (location.pathname !== '/login' && location.pathname !== '/') {
+        return null;
+    }
+
     return (
         <footer className="fixed bottom-0 w-full bg-[#0a0a0a] border-t border-[var(--color-brand-border)] p-4 text-center z-50">
             <div className="max-w-2xl mx-auto flex flex-col gap-1 items-center justify-center">
