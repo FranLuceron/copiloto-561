@@ -1,5 +1,3 @@
-import React from 'react';
-
 import React, { useState, useEffect } from 'react';
 import { shiftService } from '../services/shiftService';
 import { auth } from '../services/firebase';
@@ -80,7 +78,15 @@ export const Simulation: React.FC = () => {
 
         const finalTime = activities.length > 0 ? (activities[activities.length - 1].endTime || baseTime) : baseTime;
         const continuousResult = calculateContinuousDrive(activities, finalTime);
-        const dailyResult = calculateDailyDrive({ totalDriveMinutes: driveMs / 60000, isExtendedDriveUsed: false });
+        const dailyResult = calculateDailyDrive({
+            totalDriveMinutes: driveMs / 60000,
+            isExtendedDriveUsed: false,
+            totalBreakMinutes: 0,
+            totalRestMinutes: 0,
+            totalWorkMinutes: 0,
+            continuousDriveMinutes: 0,
+            startDate: baseTime
+        });
 
         if (continuousResult.status === 'VIOLATION' || dailyResult.status === 'VIOLATION') {
             setSimResult({ status: 'VIOLATION', message: '¡Infracción! Este plan supera los límites legales.' });
@@ -191,8 +197,8 @@ export const Simulation: React.FC = () => {
                         {step === 3 && simResult && (
                             <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 flex-1 flex flex-col">
                                 <div className={`luxury-card p-6 border-t-4 mb-4 flex-1 text-center justify-center flex flex-col items-center ${simResult.status === 'OK' ? 'border-t-green-500' :
-                                        simResult.status === 'WARNING' ? 'border-t-amber-500' :
-                                            'border-t-red-500'
+                                    simResult.status === 'WARNING' ? 'border-t-amber-500' :
+                                        'border-t-red-500'
                                     }`}>
 
                                     {simResult.status === 'OK' && <CheckCircle2 size={64} className="text-green-400 mb-4 animate-bounce" />}
