@@ -146,6 +146,20 @@ export const useStore = create<CopilotState>((set, get) => ({
 
         // Evitamos renders infinitos comprobando si el estado ES DISTINTO al que ya teníamos.
         if (currentShiftState?.compliance.status !== result.status || currentShiftState?.compliance.message !== result.message) {
+
+            // Disparador de Alarma Sonora de Tacógrafo
+            if (result.status === 'WARNING') {
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(e => console.error("Auto-play prevented", e));
+            } else if (result.status === 'VIOLATION') {
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2868/2868-preview.mp3');
+                audio.loop = true; // El pánico suena hasta que pulse pausa
+                audio.play().catch(e => console.error("Auto-play prevented", e));
+
+                // Hack rápido para detener el loop tras 10 segundos para no bloquear el dispositivo eternamente
+                setTimeout(() => { audio.pause(); }, 10000);
+            }
+
             set({ currentShiftState: { compliance: result } });
         }
     },
