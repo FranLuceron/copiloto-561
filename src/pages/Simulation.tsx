@@ -1,240 +1,255 @@
 import React, { useState, useEffect } from 'react';
-import { shiftService } from '../services/shiftService';
-import { auth } from '../services/firebase';
+import { useSimulationStore } from '../store/useSimulationStore';
 import { calculateContinuousDrive, calculateDailyDrive } from '../utils/rulesEngine';
-import type { ValidationResult, ActivitySegment } from '../types';
-import { Sparkles, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import type { ValidationResult, ActivityType } from '../types';
+import { TimelineRenderer } from '../components/TimelineRenderer';
+import { Sparkles, Info, Trash2, Play, Coffee, Briefcase, Bed, RefreshCcw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 export const Simulation: React.FC = () => {
-    const [step, setStep] = useState(1);
-    const [isLoading, setIsLoading] = useState(true);
-
-    const [startTime, setStartTime] = useState('06:00');
-    const [driveHours, setDriveHours] = useState('4.5');
-    const [breakStrategy, setBreakStrategy] = useState<'STANDARD' | 'SPLIT'>('STANDARD');
+    const { blocks, addBlock, removeBlock, clearBlocks, getMockActivities } = useSimulationStore();
     const [simResult, setSimResult] = useState<ValidationResult | null>(null);
     const [simDetails, setSimDetails] = useState('');
+    const [violationBlockId, setViolationBlockId] = useState<string | null>(null);
+    const [customMins, setCustomMins] = useState<number>(45);
 
     useEffect(() => {
-        loadAverages();
-    }, []);
+        runSimulation();
+    }, [blocks]);
 
-    const loadAverages = async () => {
-        if (!auth.currentUser) return;
-        setIsLoading(true);
-        try {
-            const avgDriveMs = await shiftService.getAverageDrivingMs(auth.currentUser.uid);
-            const avgHours = (avgDriveMs / 3600000).toFixed(1);
-            setDriveHours(avgHours > '10' ? '9.0' : avgHours);
-
-            const now = new Date();
-            setStartTime(`${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`);
-        } catch (error) {
-            console.error(error);
+    const runSimulation = () => {
+        if (blocks.length === 0) {
+            setSimResult(null);
+            setSimDetails('');
+            setViolationBlockId(null);
+            return;
         }
-        setIsLoading(false);
+
+        const activities = getMockActivities();
+
+        let violationId = null;
+        let finalResult: ValidationResult = { status: 'OK', message: 'Plan Legal Correcto. Normativa 561/2006.' };
+        let finalDetails = 'Tiempos de conducción y pausas en márgenes seguros.';
+
+        let totalDriveMinutes = 0;
+        let totalBreakMinutes = 0;
+        let totalRestMinutes = 0;
+        let totalWorkMinutes = 0;
+
+        for (let i = 0; i < activities.length; i++) {
+            const subActivities = activities.slice(0, i + 1);
+            const blockFinalTime = subActivities[subActivities.length - 1].endTime || Date.now();
+            const act = subActivities[subActivities.length - 1];
+
+            const duration = (act.endTime! - act.startTime) / 60000;
+            if (act.type === 'DRIVE') totalDriveMinutes += duration;
+            if (act.type === 'BREAK') totalBreakMinutes += duration;
+            if (act.type === 'REST') totalRestMinutes += duration;
+            if (act.type === 'WORK') totalWorkMinutes += duration;
+
+            const continuousResult = calculateContinuousDrive(subActivities, blockFinalTime);
+
+            // Creamos un baseline de baseTime para calcular si la jornada excedió los límites
+            const dailyResult = calculateDailyDrive({
+                totalDriveMinutes,
+                isExtendedDriveUsed: false,
+                totalBreakMinutes,
+                totalRestMinutes,
+                totalWorkMinutes,
+                continuousDriveMinutes: 0,
+                startDate: activities[0].startTime
+            });
+
+            if (continuousResult.status === 'VIOLATION' || dailyResult.status === 'VIOLATION') {
+                violationId = act.id;
+                finalResult = { status: 'VIOLATION', message: '¡Infracción! Este plan supera los límites legales.' };
+                finalDetails = continuousResult.status === 'VIOLATION' ? continuousResult.message : dailyResult.message;
+                break; // Stop evaluating further to highlight the exact block
+            } else if (continuousResult.status === 'WARNING' || dailyResult.status === 'WARNING') {
+                finalResult = { status: 'WARNING', message: 'Plan viable pero al límite de la normativa.' };
+                finalDetails = continuousResult.status === 'WARNING' ? continuousResult.message : dailyResult.message;
+            }
+        }
+
+        setViolationBlockId(violationId);
+        setSimResult(finalResult);
+        setSimDetails(finalDetails);
     };
 
-    const handleSimulate = () => {
-        const baseTime = Date.now();
-        let activities: ActivitySegment[] = [];
-        const driveMs = parseFloat(driveHours) * 60 * 60 * 1000;
-
-        // Construcción de maqueta de segmentos de tacógrafo en base a la estrategia
-        if (breakStrategy === 'STANDARD') {
-            const firstDriveMs = Math.min(driveMs, 4.5 * 60 * 60 * 1000);
-            activities.push({ id: '1', type: 'DRIVE', startTime: baseTime, endTime: baseTime + firstDriveMs });
-
-            const breakTime = baseTime + firstDriveMs;
-            activities.push({ id: '2', type: 'BREAK', startTime: breakTime, endTime: breakTime + (45 * 60 * 1000) });
-
-            if (driveMs > firstDriveMs) {
-                const secondStart = breakTime + (45 * 60 * 1000);
-                activities.push({ id: '3', type: 'DRIVE', startTime: secondStart, endTime: secondStart + (driveMs - firstDriveMs) });
-            }
-        } else {
-            // Split 15+30
-            const firstDriveMs = Math.min(driveMs, 2 * 60 * 60 * 1000); // Conduce primeras 2 horas
-            activities.push({ id: '1', type: 'DRIVE', startTime: baseTime, endTime: baseTime + firstDriveMs });
-
-            let cursorTime = baseTime + firstDriveMs;
-            activities.push({ id: '2', type: 'BREAK', startTime: cursorTime, endTime: cursorTime + (15 * 60 * 1000) }); // Pausa 15m
-            cursorTime += (15 * 60 * 1000);
-
-            if (driveMs > firstDriveMs) {
-                const secondDriveMs = Math.min(driveMs - firstDriveMs, 2.5 * 60 * 60 * 1000); // Conduce 2.5h
-                activities.push({ id: '3', type: 'DRIVE', startTime: cursorTime, endTime: cursorTime + secondDriveMs });
-                cursorTime += secondDriveMs;
-
-                if (driveMs > (firstDriveMs + secondDriveMs)) {
-                    activities.push({ id: '4', type: 'BREAK', startTime: cursorTime, endTime: cursorTime + (30 * 60 * 1000) }); // Pausa 30m
-                    cursorTime += (30 * 60 * 1000);
-
-                    const thirdDriveMs = driveMs - (firstDriveMs + secondDriveMs);
-                    activities.push({ id: '5', type: 'DRIVE', startTime: cursorTime, endTime: cursorTime + thirdDriveMs }); // Conduce resto
-                }
-            }
+    const handleAddBlock = (type: ActivityType, mins: number) => {
+        if (mins > 0) {
+            addBlock(type, mins);
         }
+    };
 
-        const finalTime = activities.length > 0 ? (activities[activities.length - 1].endTime || baseTime) : baseTime;
-        const continuousResult = calculateContinuousDrive(activities, finalTime);
-        const dailyResult = calculateDailyDrive({
-            totalDriveMinutes: driveMs / 60000,
-            isExtendedDriveUsed: false,
-            totalBreakMinutes: 0,
-            totalRestMinutes: 0,
-            totalWorkMinutes: 0,
-            continuousDriveMinutes: 0,
-            startDate: baseTime
-        });
-
-        if (continuousResult.status === 'VIOLATION' || dailyResult.status === 'VIOLATION') {
-            setSimResult({ status: 'VIOLATION', message: '¡Infracción! Este plan supera los límites legales.' });
-            setSimDetails(continuousResult.status === 'VIOLATION' ? continuousResult.message : dailyResult.message);
-        } else if (continuousResult.status === 'WARNING' || dailyResult.status === 'WARNING') {
-            setSimResult({ status: 'WARNING', message: 'Plan viable pero al límite de la normativa.' });
-            setSimDetails(continuousResult.status === 'WARNING' ? continuousResult.message : dailyResult.message);
-        } else {
-            setSimResult({ status: 'OK', message: 'Plan Legal Correcto. Normativa 561/2006.' });
-            setSimDetails('Tiempos de conducción y pausas en márgenes seguros.');
+    const formatDuration = (mins: number) => {
+        const hours = Math.floor(mins / 60);
+        const m = mins % 60;
+        if (hours > 0) {
+            return `${hours}h ${m > 0 ? `${m}m` : ''}`;
         }
+        return `${m}m`;
+    };
 
-        setStep(3);
+    const getIconForType = (type: ActivityType) => {
+        switch (type) {
+            case 'DRIVE': return <Play size={16} />;
+            case 'BREAK': return <Coffee size={16} />;
+            case 'REST': return <Bed size={16} />;
+            case 'WORK': return <Briefcase size={16} />;
+        }
+    };
+
+    const getLabelForType = (type: ActivityType) => {
+        switch (type) {
+            case 'DRIVE': return 'Conducción';
+            case 'BREAK': return 'Pausa';
+            case 'REST': return 'Descanso';
+            case 'WORK': return 'Otros Trabajos';
+        }
     };
 
     return (
-        <div className="p-4 sm:p-6 lg:max-w-md mx-auto relative min-h-[80vh] flex flex-col">
-            <h1 className="text-2xl font-bold font-mono tracking-tight text-white mb-6 uppercase flex items-center gap-2">
-                Simulador <span className="text-blue-400">Inteligente</span> <Sparkles className="text-blue-400" size={20} />
-            </h1>
+        <div className="p-4 sm:p-6 lg:max-w-md mx-auto relative min-h-[80vh] flex flex-col pb-24 space-y-6">
+            <header className="flex justify-between items-center">
+                <h1 className="text-xl font-bold font-mono tracking-tight text-white uppercase flex items-center gap-2">
+                    Constructor <span className="text-blue-400">Jornada</span> <Sparkles className="text-blue-400" size={18} />
+                </h1>
+                {blocks.length > 0 && (
+                    <button
+                        onClick={clearBlocks}
+                        className="text-gray-400 hover:text-red-400 transition-colors bg-black/30 p-2 rounded-lg border border-white/5"
+                        title="Limpiar Simulación"
+                    >
+                        <RefreshCcw size={16} />
+                    </button>
+                )}
+            </header>
 
-            <div className="flex-1 flex flex-col">
-                {isLoading ? (
-                    <div className="luxury-card p-6 text-center text-gray-400 animate-pulse border-[var(--color-brand-border)]">
-                        Inicializando Inteligencia Predictiva...
+            {/* Timeline View */}
+            <section className="luxury-card border-[var(--color-brand-border)] p-5 animate-in fade-in slide-in-from-top-4">
+                <h2 className="text-xs text-gray-400 uppercase tracking-widest font-bold mb-4">Línea de Tiempo Visual</h2>
+                <TimelineRenderer blocks={blocks} violationBlockId={violationBlockId} />
+            </section>
+
+            {/* Global Result Card */}
+            {simResult && blocks.length > 0 && (
+                <section className={`animate-in fade-in zoom-in duration-300 luxury-card p-4 border flex items-start gap-3 shadow-xl ${simResult.status === 'OK' ? 'border-l-4 border-l-green-500 bg-green-500/5 border-green-500/10' :
+                        simResult.status === 'WARNING' ? 'border-l-4 border-l-amber-500 bg-amber-500/5 border-amber-500/10' :
+                            'border-l-4 border-l-red-500 bg-red-500/5 border-red-500/10'
+                    }`}>
+                    <div className="mt-1">
+                        {simResult.status === 'OK' && <CheckCircle2 size={24} className="text-green-500" />}
+                        {simResult.status === 'WARNING' && <AlertTriangle size={24} className="text-amber-500" />}
+                        {simResult.status === 'VIOLATION' && <AlertTriangle size={24} className="text-red-500 animate-pulse" />}
+                    </div>
+                    <div>
+                        <h3 className="text-white font-bold text-sm tracking-wide mb-1 uppercase">{simResult.message}</h3>
+                        <p className="text-gray-400 text-xs leading-relaxed">{simDetails}</p>
+                    </div>
+                </section>
+            )}
+
+            {/* Blocks List */}
+            <section className="flex-1 space-y-2 animate-in fade-in">
+                <h2 className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-3 pl-1">Bloques de la Jornada</h2>
+
+                {blocks.length === 0 ? (
+                    <div className="text-center p-8 bg-black/20 rounded-xl border border-white/5 border-dashed">
+                        <p className="text-gray-500 text-sm">Añade bloques abajo para construir el turno paso a paso.</p>
                     </div>
                 ) : (
-                    <>
-                        {/* WIZARD STEP 1 */}
-                        {step === 1 && (
-                            <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col">
-                                <div className="luxury-card p-6 border-[var(--color-brand-border)] mb-4 flex-1">
-                                    <h2 className="text-gray-300 font-bold mb-4 uppercase tracking-widest text-sm">Paso 1: Arranque</h2>
-                                    <p className="text-sm text-gray-400 mb-6">¿A qué hora estimas arrancar el motor para este turno?</p>
-
-                                    <input
-                                        type="time"
-                                        value={startTime}
-                                        onChange={(e) => setStartTime(e.target.value)}
-                                        className="w-full bg-black/50 border border-[var(--color-brand-border)] rounded-xl p-4 text-white text-2xl font-mono text-center focus:border-blue-500 outline-none transition-all shadow-inner"
-                                    />
+                    <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 pb-2">
+                        {blocks.map((block, index) => (
+                            <div
+                                key={block.id}
+                                className={`flex items-center justify-between p-3 rounded-xl bg-black/40 border transition-all ${block.id === violationBlockId ? 'border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.15)] bg-red-500/5' : 'border-white/5 hover:border-white/20'
+                                    }`}
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${block.type === 'DRIVE' ? 'bg-[var(--color-state-drive)]/20 text-[var(--color-state-drive)]' :
+                                            block.type === 'BREAK' ? 'bg-[var(--color-state-break)]/20 text-[var(--color-state-break)]' :
+                                                block.type === 'REST' ? 'bg-[var(--color-state-rest)]/20 text-[var(--color-state-rest)]' :
+                                                    'bg-[var(--color-state-work)]/20 text-[var(--color-state-work)]'
+                                        }`}>
+                                        {getIconForType(block.type)}
+                                    </div>
+                                    <div>
+                                        <p className="text-white font-bold text-sm">
+                                            {index + 1}. {getLabelForType(block.type)}
+                                        </p>
+                                        <p className="text-gray-400 text-xs font-mono">
+                                            {formatDuration(block.durationMins)}
+                                        </p>
+                                    </div>
                                 </div>
-                                <button onClick={() => setStep(2)} className="w-full bg-blue-500 hover:bg-blue-400 text-black font-bold uppercase tracking-widest p-4 rounded-xl flex justify-center items-center gap-2 transition-all shadow-[0_0_15px_rgba(59,130,246,0.2)]">
-                                    Siguiente <ArrowRight size={18} />
+                                <button
+                                    onClick={() => removeBlock(block.id)}
+                                    className="p-2 text-gray-500 hover:text-red-400 transition-colors hover:bg-red-500/10 rounded-lg group"
+                                    aria-label="Eliminar bloque"
+                                    title="Eliminar este bloque"
+                                >
+                                    <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
                                 </button>
                             </div>
-                        )}
-
-                        {/* WIZARD STEP 2 */}
-                        {step === 2 && (
-                            <div className="animate-in fade-in slide-in-from-right-4 duration-300 flex-1 flex flex-col">
-                                <div className="luxury-card p-6 border-[var(--color-brand-border)] mb-4 flex-1 overflow-y-auto">
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <button onClick={() => setStep(1)} className="text-gray-500 hover:text-white p-1 bg-white/5 rounded"><ArrowLeft size={16} /></button>
-                                        <h2 className="text-gray-300 font-bold uppercase tracking-widest text-sm">Paso 2: Ruta y Pausas</h2>
-                                    </div>
-
-                                    <div className="mb-6">
-                                        <label className="block text-xs text-blue-400 font-bold uppercase tracking-wider mb-2 flex items-center gap-1">
-                                            <Sparkles size={12} /> Sugerencia basada en tu historial
-                                        </label>
-                                        <div className="flex items-center gap-4 bg-black/30 border border-white/5 p-4 rounded-xl">
-                                            <input
-                                                type="number"
-                                                step="0.5"
-                                                value={driveHours}
-                                                onChange={(e) => setDriveHours(e.target.value)}
-                                                className="w-20 bg-transparent text-white text-2xl font-mono text-center border-b border-gray-600 focus:border-blue-500 outline-none"
-                                            />
-                                            <span className="text-gray-400 font-bold tracking-widest uppercase">Horas Volante</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-3">
-                                        <label className="block text-xs text-gray-500 uppercase tracking-wider mb-2">Estrategia de Pausa</label>
-
-                                        <div
-                                            onClick={() => setBreakStrategy('STANDARD')}
-                                            className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${breakStrategy === 'STANDARD' ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black/30 border-white/5 hover:border-white/20'}`}
-                                        >
-                                            <div className={`w-4 h-4 rounded-full border ${breakStrategy === 'STANDARD' ? 'border-[4px] border-blue-400 bg-black' : 'border-gray-600'}`}></div>
-                                            <div>
-                                                <span className="block text-white font-bold text-sm">Estándar (45 min)</span>
-                                                <span className="block text-gray-500 text-[10px] uppercase">Gastar 4.5h continuas al límite</span>
-                                            </div>
-                                        </div>
-
-                                        <div
-                                            onClick={() => setBreakStrategy('SPLIT')}
-                                            className={`p-4 rounded-xl border cursor-pointer transition-all flex items-center gap-3 ${breakStrategy === 'SPLIT' ? 'bg-blue-500/10 border-blue-500/50' : 'bg-black/30 border-white/5 hover:border-white/20'}`}
-                                        >
-                                            <div className={`w-4 h-4 rounded-full border ${breakStrategy === 'SPLIT' ? 'border-[4px] border-blue-400 bg-black' : 'border-gray-600'}`}></div>
-                                            <div>
-                                                <span className="block text-white font-bold text-sm">Fraccionada (15 + 30 min)</span>
-                                                <span className="block text-gray-500 text-[10px] uppercase">Partir el turno en dos pedazos seguros</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <button onClick={handleSimulate} className="w-full bg-blue-500 hover:bg-blue-400 text-black font-bold uppercase tracking-widest p-4 rounded-xl flex justify-center items-center gap-2 transition-all shadow-[0_0_15px_rgba(59,130,246,0.2)]">
-                                    Simular Jornada
-                                </button>
-                            </div>
-                        )}
-
-                        {/* WIZARD STEP 3 (Result) */}
-                        {step === 3 && simResult && (
-                            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 flex-1 flex flex-col">
-                                <div className={`luxury-card p-6 border-t-4 mb-4 flex-1 text-center justify-center flex flex-col items-center ${simResult.status === 'OK' ? 'border-t-green-500' :
-                                    simResult.status === 'WARNING' ? 'border-t-amber-500' :
-                                        'border-t-red-500'
-                                    }`}>
-
-                                    {simResult.status === 'OK' && <CheckCircle2 size={64} className="text-green-400 mb-4 animate-bounce" />}
-                                    {simResult.status === 'WARNING' && <AlertTriangle size={64} className="text-amber-400 mb-4 animate-pulse" />}
-                                    {simResult.status === 'VIOLATION' && <AlertTriangle size={64} className="text-red-500 mb-4 animate-bounce" />}
-
-                                    <h2 className="text-white font-bold text-xl mb-2">{simResult.message}</h2>
-                                    <p className="text-gray-400 text-sm mb-6 max-w-[250px]">{simDetails}</p>
-
-                                    <div className="w-full bg-black/40 p-4 rounded-xl border border-white/5 text-left mb-6">
-                                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2 border-b border-white/5 pb-2">Resumen de Parámetros</p>
-                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                            <span className="text-gray-400">Arranque:</span>
-                                            <span className="text-white font-mono text-right">{startTime}</span>
-                                            <span className="text-gray-400">Conducción:</span>
-                                            <span className="text-white font-mono text-right">{driveHours} Hrs</span>
-                                            <span className="text-gray-400">Estrategia:</span>
-                                            <span className="text-white font-mono text-right">
-                                                {breakStrategy === 'STANDARD' ? '45 min' : '15 + 30 min'}
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                </div>
-
-                                <div className="text-[10px] text-gray-500 uppercase tracking-widest text-center mb-4 flex items-center justify-center gap-1 font-bold">
-                                    <Info size={12} /> Esta es una estimación. Ante dudas, consulta el tacógrafo real.
-                                </div>
-
-                                <button onClick={() => setStep(1)} className="w-full bg-transparent border border-gray-600 text-gray-300 hover:text-white font-bold uppercase tracking-widest p-4 rounded-xl flex justify-center items-center transition-all">
-                                    Nueva Simulación
-                                </button>
-                            </div>
-                        )}
-                    </>
+                        ))}
+                    </div>
                 )}
+            </section>
+
+            {/* Builder Controls */}
+            <section className="bg-[var(--color-brand-card)] p-4 rounded-[var(--radius-luxury)] border border-[var(--color-brand-border)] animate-in slide-in-from-bottom-8">
+                <div className="flex items-center justify-between mb-4 bg-black/30 p-2 rounded-xl border border-white/5">
+                    <span className="text-xs text-gray-400 font-bold uppercase tracking-wider pl-2">Duración:</span>
+                    <div className="flex items-center">
+                        <input
+                            type="number"
+                            min="1"
+                            max="1440"
+                            value={customMins}
+                            onChange={(e) => setCustomMins(parseInt(e.target.value) || 0)}
+                            className="w-16 bg-transparent text-white font-mono text-center text-lg outline-none focus:text-blue-400 transition-colors border-b border-gray-600 focus:border-blue-400 mr-2"
+                        />
+                        <span className="text-xs text-gray-500 pr-2 uppercase">min</span>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                    <button
+                        onClick={() => handleAddBlock('DRIVE', customMins)}
+                        className="p-3 bg-[var(--color-state-drive)]/10 text-[var(--color-state-drive)] border border-[var(--color-state-drive)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-drive)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.05)] hover:shadow-[0_0_20px_rgba(16,185,129,0.15)]"
+                    >
+                        <Play size={24} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Conducción</span>
+                    </button>
+
+                    <button
+                        onClick={() => handleAddBlock('BREAK', customMins)}
+                        className="p-3 bg-[var(--color-state-break)]/10 text-[var(--color-state-break)] border border-[var(--color-state-break)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-break)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(245,158,11,0.05)] hover:shadow-[0_0_20px_rgba(245,158,11,0.15)]"
+                    >
+                        <Coffee size={24} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Pausa</span>
+                    </button>
+
+                    <button
+                        onClick={() => handleAddBlock('WORK', customMins)}
+                        className="p-3 bg-[var(--color-state-work)]/10 text-[var(--color-state-work)] border border-[var(--color-state-work)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-work)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(139,92,246,0.05)] hover:shadow-[0_0_20px_rgba(139,92,246,0.15)]"
+                    >
+                        <Briefcase size={24} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Otros</span>
+                    </button>
+
+                    <button
+                        onClick={() => handleAddBlock('REST', customMins)}
+                        className="p-3 bg-[var(--color-state-rest)]/10 text-[var(--color-state-rest)] border border-[var(--color-state-rest)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-rest)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(59,130,246,0.05)] hover:shadow-[0_0_20px_rgba(59,130,246,0.15)]"
+                    >
+                        <Bed size={24} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">Descanso</span>
+                    </button>
+                </div>
+            </section>
+
+            <div className="text-[10px] text-gray-500 uppercase tracking-widest text-center mt-2 flex items-center justify-center gap-1 font-bold">
+                <Info size={12} /> Estimación visual predictiva.
             </div>
         </div>
     );
