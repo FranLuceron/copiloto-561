@@ -24,3 +24,10 @@ export interface DailyStats {
     isExtendedDriveUsed: boolean; // 10h instead of 9h
     startDate: number; // start of the daily shift
 }
+
+export interface FrequentRoute {
+    id: string; // Document ID from Firestore
+    userId: string;
+    routeName: string;
+    blocks: any[]; // We will type it properly as SimulationBlock when used
+}

@@ -15,6 +15,7 @@ interface SimulationState {
     removeBlock: (id: string) => void;
     updateBlock: (id: string, durationMins: number) => void;
     clearBlocks: () => void;
+    loadBlocks: (blocks: SimulationBlock[]) => void;
 
     // Helper to convert to ActivitySegment for rulesEngine
     getMockActivities: () => ActivitySegment[];
@@ -50,6 +51,10 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
 
     clearBlocks: () => {
         set({ blocks: [] });
+    },
+
+    loadBlocks: (blocks) => {
+        set({ blocks });
     },
 
     getMockActivities: () => {

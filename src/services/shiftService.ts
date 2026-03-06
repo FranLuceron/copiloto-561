@@ -1,5 +1,7 @@
-import { collection, addDoc, query, where, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, orderBy, limit, Timestamp, doc } from 'firebase/firestore';
 import { db } from './firebase';
+import type { SimulationBlock } from '../store/useSimulationStore';
+import type { FrequentRoute } from '../types';
 
 export interface ShiftData {
     userId: string;
@@ -68,5 +70,34 @@ export const shiftService = {
 
         const totalDriving = shifts.reduce((acc, shift) => acc + shift.drivingMs, 0);
         return totalDriving / shifts.length;
+    },
+
+    // 4. Guardar Ruta Frecuente (Constructor)
+    async saveFrequentRoute(userId: string, routeName: string, blocks: SimulationBlock[]) {
+        if (!userId) throw new Error('Usuario no autenticado');
+
+        const userDocRef = doc(db, 'users', userId);
+        const routesRef = collection(userDocRef, 'frequent_routes');
+        await addDoc(routesRef, {
+            routeName,
+            blocks
+        });
+    },
+
+    // 5. Obtener Rutas Frecuentes del Usuario
+    async getFrequentRoutes(userId: string): Promise<FrequentRoute[]> {
+        if (!userId) return [];
+
+        const userDocRef = doc(db, 'users', userId);
+        const routesRef = collection(userDocRef, 'frequent_routes');
+        const q = query(routesRef); // Ya estamos en la colección del usuario
+
+        const querySnapshot = await getDocs(q);
+        return querySnapshot.docs.map(docSnap => ({
+            id: docSnap.id,
+            userId,
+            routeName: docSnap.data().routeName,
+            blocks: docSnap.data().blocks
+        } as FrequentRoute));
     }
 };
