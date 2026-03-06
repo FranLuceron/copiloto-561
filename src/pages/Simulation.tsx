@@ -3,12 +3,12 @@ import { useSimulationStore } from '../store/useSimulationStore';
 import { calculateContinuousDrive, calculateDailyDrive } from '../utils/rulesEngine';
 import type { ValidationResult, ActivityType, FrequentRoute } from '../types';
 import { TimelineRenderer } from '../components/TimelineRenderer';
-import { Sparkles, Info, Trash2, Play, Coffee, Briefcase, Bed, RefreshCcw, AlertTriangle, CheckCircle2, Save, Download, Calculator, X } from 'lucide-react';
+import { Sparkles, Info, Trash2, Play, Coffee, Briefcase, Bed, RefreshCcw, AlertTriangle, CheckCircle2, Save, Download, Calculator, X, Lightbulb } from 'lucide-react';
 import { auth } from '../services/firebase';
 import { shiftService } from '../services/shiftService';
 
 export const Simulation: React.FC = () => {
-    const { blocks, addBlock, removeBlock, clearBlocks, getMockActivities, loadBlocks } = useSimulationStore();
+    const { blocks, offset, setOffset, addBlock, removeBlock, clearBlocks, getMockActivities, loadBlocks } = useSimulationStore();
     const [simResult, setSimResult] = useState<ValidationResult | null>(null);
     const [simDetails, setSimDetails] = useState('');
     const [violationBlockId, setViolationBlockId] = useState<string | null>(null);
@@ -83,6 +83,14 @@ export const Simulation: React.FC = () => {
         let finalResult: ValidationResult = { status: 'OK', message: 'Plan Legal Correcto. Normativa 561/2006.' };
         let finalDetails = 'Tiempos de conducción y pausas en márgenes seguros.';
 
+        // --- Alerta Temprana del Offset ---
+        if (offset && offset.drivingTimeToday > 270 && !offset.hasTakenBreak) {
+            setSimResult({ status: 'VIOLATION', message: '¡Infracción inmediata!', remainingMinutes: 0 });
+            setSimDetails(`El bloque inicial insertado (${formatDuration(offset.drivingTimeToday)}) ya excede las 4h30m permitidas sin pausas.`);
+            setViolationBlockId(blocks[0]?.id || null); // Marca el primero si existe
+            return;
+        }
+
         let totalDriveMinutes = 0;
         let totalBreakMinutes = 0;
         let totalRestMinutes = 0;
@@ -99,8 +107,6 @@ export const Simulation: React.FC = () => {
             if (act.type === 'REST') totalRestMinutes += duration;
             if (act.type === 'WORK') totalWorkMinutes += duration;
 
-            const continuousResult = calculateContinuousDrive(subActivities, blockFinalTime);
-
             // Creamos un baseline de baseTime para calcular si la jornada excedió los límites
             const dailyResult = calculateDailyDrive({
                 totalDriveMinutes,
@@ -109,8 +115,11 @@ export const Simulation: React.FC = () => {
                 totalRestMinutes,
                 totalWorkMinutes,
                 continuousDriveMinutes: 0,
-                startDate: activities[0].startTime
-            });
+                startDate: activities[0]?.startTime || Date.now()
+            }, offset); // Pasamos offset para Daily (Calcula hoy)
+
+            // Usamos una función puente para calcular Continuous
+            const continuousResult = calculateContinuousDrive(subActivities, blockFinalTime, offset);
 
             if (continuousResult.status === 'VIOLATION' || dailyResult.status === 'VIOLATION') {
                 violationId = act.id;
@@ -225,7 +234,7 @@ export const Simulation: React.FC = () => {
             {/* Timeline View */}
             <section className="luxury-card border-[var(--color-brand-border)] p-5 animate-in fade-in slide-in-from-top-4">
                 <h2 className="text-xs text-gray-400 uppercase tracking-widest font-bold mb-4">Línea de Tiempo Visual</h2>
-                <TimelineRenderer blocks={blocks} violationBlockId={violationBlockId} />
+                <TimelineRenderer blocks={blocks} violationBlockId={violationBlockId} offsetMins={offset.drivingTimeToday} />
             </section>
 
             {/* Global Result Card */}
@@ -246,9 +255,45 @@ export const Simulation: React.FC = () => {
                 </section>
             )}
 
+            {/* Setup / Configuración Inicial - Paso 0 */}
+            <section className="bg-black/20 border border-white/10 rounded-xl p-4 animate-in fade-in slide-in-from-top-2">
+                <h2 className="text-xs text-blue-400 uppercase tracking-widest font-bold mb-3 flex items-center gap-2">
+                    <span className="bg-blue-500/20 w-5 h-5 rounded-full flex items-center justify-center text-[10px]">0</span> Estado Inicial (Opcional)
+                </h2>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-white/5">
+                        <span className="text-xs text-gray-400 font-bold">Conducción Hoy:</span>
+                        <div className="flex items-center gap-1">
+                            <input
+                                type="number"
+                                min="0"
+                                max="600"
+                                value={offset.drivingTimeToday}
+                                onChange={(e) => setOffset({ ...offset, drivingTimeToday: parseInt(e.target.value) || 0 })}
+                                className="w-14 bg-transparent border-b border-gray-600 focus:border-blue-400 text-white text-right outline-none font-mono text-sm"
+                            />
+                            <span className="text-[10px] text-gray-500">min</span>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-white/5">
+                        <span className="text-xs text-gray-400 font-bold">Pausa 45' Tomada:</span>
+                        <input
+                            type="checkbox"
+                            checked={offset.hasTakenBreak}
+                            onChange={(e) => setOffset({ ...offset, hasTakenBreak: e.target.checked })}
+                            className="w-4 h-4 accent-blue-500 rounded cursor-pointer"
+                        />
+                    </div>
+                </div>
+            </section>
+
             {/* Blocks List */}
             <section className="flex-1 space-y-2 animate-in fade-in">
-                <h2 className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-3 pl-1">Bloques de la Jornada</h2>
+                <h2 className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-3 pl-1 flex items-center gap-2">
+                    <span className="bg-gray-800 w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-gray-400">1</span> Bloques de la Jornada
+                </h2>
 
                 {blocks.length === 0 ? (
                     <div className="text-center p-8 bg-black/20 rounded-xl border border-white/5 border-dashed">
@@ -256,44 +301,80 @@ export const Simulation: React.FC = () => {
                     </div>
                 ) : (
                     <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 pb-2">
-                        {blocks.map((block, index) => (
-                            <div
-                                key={block.id}
-                                className={`flex items-center justify-between p-3 rounded-xl bg-black/40 border transition-all ${block.id === violationBlockId ? 'border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.15)] bg-red-500/5' : 'border-white/5 hover:border-white/20'
-                                    }`}
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${block.type === 'DRIVE' ? 'bg-[var(--color-state-drive)]/20 text-[var(--color-state-drive)]' :
-                                        block.type === 'BREAK' ? 'bg-[var(--color-state-break)]/20 text-[var(--color-state-break)]' :
-                                            block.type === 'REST' ? 'bg-[var(--color-state-rest)]/20 text-[var(--color-state-rest)]' :
-                                                'bg-[var(--color-state-work)]/20 text-[var(--color-state-work)]'
-                                        }`}>
-                                        {getIconForType(block.type)}
-                                    </div>
-                                    <div>
-                                        <p className="text-white font-bold text-sm">
-                                            {index + 1}. {getLabelForType(block.type)}
-                                            {block.customLabel && (
-                                                <span className="ml-2 text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-gray-300 font-normal">
-                                                    {block.customLabel}
-                                                </span>
-                                            )}
-                                        </p>
-                                        <p className="text-gray-400 text-xs font-mono">
-                                            {formatDuration(block.durationMins)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <button
-                                    onClick={() => removeBlock(block.id)}
-                                    className="p-2 text-gray-500 hover:text-red-400 transition-colors hover:bg-red-500/10 rounded-lg group"
-                                    aria-label="Eliminar bloque"
-                                    title="Eliminar este bloque"
+                        {blocks.map((block, index) => {
+                            let copilotMsg = null;
+                            let isWarning = false;
+
+                            if (block.type === 'DRIVE') {
+                                // Para el copiloto, evaluamos hasta este bloque incluido
+                                const subActivities = getMockActivities().slice(0, index + 1);
+                                const currentBlockTime = subActivities[subActivities.length - 1]?.endTime || Date.now();
+                                const copilotResult = calculateContinuousDrive(subActivities, currentBlockTime, offset);
+
+                                const remaining = copilotResult.remainingMinutes ?? 0;
+
+                                if (remaining > 0) {
+                                    isWarning = remaining <= 30;
+                                    copilotMsg = `Te quedan ${formatDuration(remaining)} de conducción continua.`;
+                                } else {
+                                    isWarning = true;
+                                    copilotMsg = `Deberías haber hecho una pausa aquí.`;
+                                }
+                            }
+
+                            return (
+                                <div
+                                    key={block.id}
+                                    className={`flex flex-col p-3 rounded-xl bg-black/40 border transition-all ${block.id === violationBlockId ? 'border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.15)] bg-red-500/5' : 'border-white/5 hover:border-white/20'}`}
                                 >
-                                    <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
-                                </button>
-                            </div>
-                        ))}
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${block.type === 'DRIVE' ? 'bg-[var(--color-state-drive)]/20 text-[var(--color-state-drive)]' :
+                                                block.type === 'BREAK' ? 'bg-[var(--color-state-break)]/20 text-[var(--color-state-break)]' :
+                                                    block.type === 'REST' ? 'bg-[var(--color-state-rest)]/20 text-[var(--color-state-rest)]' :
+                                                        'bg-[var(--color-state-work)]/20 text-[var(--color-state-work)]'
+                                                }`}>
+                                                {getIconForType(block.type)}
+                                            </div>
+                                            <div>
+                                                <p className="text-white font-bold text-sm">
+                                                    {index + 1}. {getLabelForType(block.type)}
+                                                    {block.customLabel && (
+                                                        <span className="ml-2 text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-gray-300 font-normal">
+                                                            {block.customLabel}
+                                                        </span>
+                                                    )}
+                                                </p>
+                                                <p className="text-gray-400 text-xs font-mono">
+                                                    {formatDuration(block.durationMins)}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => removeBlock(block.id)}
+                                            className="p-2 text-gray-500 hover:text-red-400 transition-colors hover:bg-red-500/10 rounded-lg group"
+                                            aria-label="Eliminar bloque"
+                                            title="Eliminar este bloque"
+                                        >
+                                            <Trash2 size={16} className="group-hover:scale-110 transition-transform" />
+                                        </button>
+                                    </div>
+
+                                    {/* Copilot Hint para bloques de conducción */}
+                                    {block.type === 'DRIVE' && copilotMsg && (
+                                        <div className={`mt-3 border rounded-lg p-2.5 flex items-start gap-2 animate-in fade-in slide-in-from-top-1 ${isWarning ? 'bg-amber-500/10 border-amber-500/20' : 'bg-blue-500/10 border-blue-500/20'
+                                            }`}>
+                                            <Lightbulb size={14} className={`${isWarning ? 'text-amber-400' : 'text-blue-400'} shrink-0 mt-0.5`} />
+                                            <div className="flex-1">
+                                                <p className={`text-[11px] leading-tight ${isWarning ? 'text-amber-300/90' : 'text-blue-300/90'}`}>
+                                                    <span className={`font-bold ${isWarning ? 'text-amber-300' : 'text-blue-300'}`}>Copiloto:</span> {copilotMsg}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
             </section>

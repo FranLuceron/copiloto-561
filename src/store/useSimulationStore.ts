@@ -8,10 +8,18 @@ export interface SimulationBlock {
     customLabel?: string; // Etiqueta o nota personalizada (Ej: 400KM a 75KM/h)
 }
 
+export interface SimulationOffset {
+    drivingTimeToday: number; // Mins
+    lastRestType: 'NONE' | '9H' | '11H';
+    hasTakenBreak: boolean; // Si ha tomado una pausa de 45m válida
+}
+
 interface SimulationState {
     blocks: SimulationBlock[];
+    offset: SimulationOffset;
 
     // Actions
+    setOffset: (offset: SimulationOffset) => void;
     addBlock: (type: ActivityType, durationMins: number, customLabel?: string) => void;
     removeBlock: (id: string) => void;
     updateBlock: (id: string, durationMins: number) => void;
@@ -24,6 +32,13 @@ interface SimulationState {
 
 export const useSimulationStore = create<SimulationState>((set, get) => ({
     blocks: [],
+    offset: {
+        drivingTimeToday: 0,
+        lastRestType: 'NONE',
+        hasTakenBreak: false
+    },
+
+    setOffset: (offset) => set({ offset }),
 
     addBlock: (type, durationMins, customLabel) => {
         const newBlock: SimulationBlock = {
@@ -52,7 +67,10 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
     },
 
     clearBlocks: () => {
-        set({ blocks: [] });
+        set({
+            blocks: [],
+            offset: { drivingTimeToday: 0, lastRestType: 'NONE', hasTakenBreak: false }
+        });
     },
 
     loadBlocks: (blocks) => {

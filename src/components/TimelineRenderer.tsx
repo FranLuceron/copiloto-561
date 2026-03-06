@@ -6,6 +6,7 @@ import { AlertTriangle } from 'lucide-react';
 interface TimelineRendererProps {
     blocks: SimulationBlock[];
     violationBlockId?: string | null;
+    offsetMins?: number;
 }
 
 const getColorForType = (type: ActivityType) => {
@@ -37,12 +38,12 @@ const formatDuration = (mins: number) => {
     return `${m}m`;
 };
 
-export const TimelineRenderer: React.FC<TimelineRendererProps> = ({ blocks, violationBlockId }) => {
+export const TimelineRenderer: React.FC<TimelineRendererProps> = ({ blocks, violationBlockId, offsetMins = 0 }) => {
     // Calcular el total de minutos para hacer porcentajes relativos
-    const totalMins = blocks.reduce((sum, b) => sum + b.durationMins, 0);
+    const totalMins = blocks.reduce((sum, b) => sum + b.durationMins, 0) + offsetMins;
 
-    // Si no hay bloques, mostramos un estado vacío
-    if (blocks.length === 0) {
+    // Si no hay bloques ni offset, mostramos un estado vacío
+    if (totalMins === 0) {
         return (
             <div className="w-full h-12 bg-black/40 rounded-xl border border-white/5 flex items-center justify-center text-xs text-gray-500 uppercase tracking-widest font-bold">
                 Línea de tiempo vacía
@@ -53,8 +54,24 @@ export const TimelineRenderer: React.FC<TimelineRendererProps> = ({ blocks, viol
     return (
         <div className="w-full space-y-2">
 
+            {/* Configuración Visual del Offset */}
+            <div className="flex justify-between items-center text-xs font-mono text-gray-400 mb-1">
+                <span>{offsetMins > 0 ? `Inicio: +${formatDuration(offsetMins)}` : 'Inicio'}</span>
+                <span>Total Jornada: <span className="text-white font-bold">{formatDuration(totalMins)}</span></span>
+            </div>
+
             {/* Barra Visual */}
             <div className="flex w-full h-12 rounded-xl overflow-hidden border border-white/10 shadow-inner bg-black/50">
+                {offsetMins > 0 && (
+                    <div
+                        style={{ width: `${Math.max((offsetMins / totalMins) * 100, 2)}%` }}
+                        className="h-full bg-white/10 opacity-70 border-r border-black/30 flex items-center justify-center cursor-help"
+                        title={`Conducción Previa Declarada: ${formatDuration(offsetMins)}`}
+                    >
+                        <div className="w-full h-full bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSJ0cmFuc3BhcmVudCIvPgo8cGF0aCBkPSJNMCA0TDQgMFpNMCAwTDRfNE0wIDJM4PMgMlpNMCA0TDQgNFpNMiA0TDQgMlpNMCAyTDIgMFpNMiAwTDAgMloiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjI1KSIgc3Ryb2tlLXdpZHRoPSIxIi8+Cjwvc3ZnPg==')] opacity-50 mix-blend-overlay"></div>
+                    </div>
+                )}
+
                 {blocks.map((block) => {
                     const widthPercent = Math.max((block.durationMins / totalMins) * 100, 2); // Minimum width 2% for visibility
                     const isViolation = block.id === violationBlockId;
@@ -73,12 +90,6 @@ export const TimelineRenderer: React.FC<TimelineRendererProps> = ({ blocks, viol
                         </div>
                     );
                 })}
-            </div>
-
-            {/* Leyenda y Marcador Total */}
-            <div className="flex justify-between items-center text-xs font-mono text-gray-400">
-                <span>Inicio</span>
-                <span>Total: <span className="text-white font-bold">{formatDuration(totalMins)}</span></span>
             </div>
 
             {/* Aviso explícito de infracción si la hay */}
