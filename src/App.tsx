@@ -7,6 +7,7 @@ import { Dashboard } from './components/Dashboard';
 import { Footer } from './components/Footer';
 import { History } from './pages/History';
 import { Simulation } from './pages/Simulation';
+import { QuizView } from './pages/QuizView';
 import { AppLayout } from './layouts/AppLayout';
 
 // Subrutas que dependen de Auth para saber adónde redirigir la raíz ("/")
@@ -57,6 +58,17 @@ const App: React.FC = () => {
                 <ProtectedRoute>
                   <AppLayout>
                     <Simulation />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/quiz"
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <QuizView />
                   </AppLayout>
                 </ProtectedRoute>
               }

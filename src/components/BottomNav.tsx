@@ -1,12 +1,13 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, History, Sparkles } from 'lucide-react';
+import { LayoutDashboard, History, Sparkles, Target } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
     const navItems = [
         { to: '/dashboard', icon: LayoutDashboard, label: 'Inicio' },
         { to: '/history', icon: History, label: 'Historial' },
-        { to: '/simulation', icon: Sparkles, label: 'Simulador' }
+        { to: '/simulation', icon: Sparkles, label: 'Simula' },
+        { to: '/quiz', icon: Target, label: 'Test' }
     ];
 
     return (
