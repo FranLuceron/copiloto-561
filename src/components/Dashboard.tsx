@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store/useStore';
 import { auth } from '../services/firebase';
 import { signOut } from 'firebase/auth';
-import { Play, Coffee, Bed, Briefcase, LogOut, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Play, Coffee, Bed, Briefcase, LogOut, AlertTriangle, RotateCcw, X } from 'lucide-react';
 import { ComplianceBadge } from './ComplianceBadge';
+import type { ActivityType } from '../types';
 
 // Aisla el re-render por segundo solo a la hora del Header
 const HeaderClock: React.FC = () => {
@@ -33,16 +34,41 @@ const ActivityTimer: React.FC = () => {
     }, [currentActivity, currentActivitySession, checkCompliance]);
 
     let currentTimerDisplay = "00:00:00";
+    let isCountdown = false;
+    let isExpired = false;
+
     if (currentActivity && currentActivitySession && !currentActivitySession.endTime) {
         const elapsedMs = now - currentActivitySession.startTime;
-        const hrs = Math.floor(elapsedMs / 3600000).toString().padStart(2, '0');
-        const mins = Math.floor((elapsedMs % 3600000) / 60000).toString().padStart(2, '0');
-        const secs = Math.floor((elapsedMs % 60000) / 1000).toString().padStart(2, '0');
-        currentTimerDisplay = `${hrs}:${mins}:${secs}`;
+
+        if (currentActivitySession.expectedDurationMins) {
+            isCountdown = true;
+            const expectedMs = currentActivitySession.expectedDurationMins * 60000;
+            const remainingMs = expectedMs - elapsedMs;
+
+            if (remainingMs <= 0) {
+                isExpired = true;
+                currentTimerDisplay = "00:00:00";
+            } else {
+                const hrs = Math.floor(remainingMs / 3600000).toString().padStart(2, '0');
+                const mins = Math.floor((remainingMs % 3600000) / 60000).toString().padStart(2, '0');
+                const secs = Math.floor((remainingMs % 60000) / 1000).toString().padStart(2, '0');
+                currentTimerDisplay = `${hrs}:${mins}:${secs}`;
+            }
+        } else {
+            // Standard progressive timer
+            const hrs = Math.floor(elapsedMs / 3600000).toString().padStart(2, '0');
+            const mins = Math.floor((elapsedMs % 3600000) / 60000).toString().padStart(2, '0');
+            const secs = Math.floor((elapsedMs % 60000) / 1000).toString().padStart(2, '0');
+            currentTimerDisplay = `${hrs}:${mins}:${secs}`;
+        }
     }
 
     return (
-        <div className="text-5xl sm:text-6xl font-black font-mono tracking-tighter text-white">
+        <div className={`text-5xl sm:text-6xl font-black font-mono tracking-tighter transition-colors ${isExpired ? 'text-red-500 animate-pulse' :
+            isCountdown && currentActivity === 'BREAK' ? 'text-amber-400' :
+                isCountdown && currentActivity === 'REST' ? 'text-blue-400' :
+                    'text-white'
+            }`}>
             {currentTimerDisplay}
         </div>
     );
@@ -57,9 +83,18 @@ export const Dashboard: React.FC = () => {
     const removeLastBlock = useStore(state => state.removeLastBlock);
     const hasActivities = useStore(state => state.activities.length > 0);
 
+    const [modalType, setModalType] = useState<ActivityType | null>(null);
+
     const handleLogout = async () => {
         await signOut(auth);
         navigate('/');
+    };
+
+    const handleDurationSelect = (mins: number) => {
+        if (modalType) {
+            addBlock(modalType, mins);
+            setModalType(null);
+        }
     };
 
     const getActivityText = () => {
@@ -179,7 +214,8 @@ export const Dashboard: React.FC = () => {
                 </button>
 
                 <button
-                    onClick={() => addBlock('BREAK')}
+                    onClick={() => setModalType('BREAK')}
+                    disabled={currentActivity === 'BREAK'}
                     aria-label="Iniciar Pausa"
                     className={`flex flex-col items-center justify-center p-4 min-h-[100px] rounded-[20px] transition-all duration-200 border ${currentActivity === 'BREAK'
                         ? 'bg-[var(--color-state-break)]/10 border-[var(--color-state-break)] text-[var(--color-state-break)] shadow-[0_0_20px_rgba(245,158,11,0.15)] scale-[0.98]'
@@ -203,7 +239,8 @@ export const Dashboard: React.FC = () => {
                 </button>
 
                 <button
-                    onClick={() => addBlock('REST')}
+                    onClick={() => setModalType('REST')}
+                    disabled={currentActivity === 'REST'}
                     aria-label="Iniciar Descanso Diario"
                     className={`flex flex-col items-center justify-center p-4 min-h-[100px] rounded-[20px] transition-all duration-200 border ${currentActivity === 'REST'
                         ? 'bg-[var(--color-state-rest)]/10 border-[var(--color-state-rest)] text-[var(--color-state-rest)] shadow-[0_0_20px_rgba(59,130,246,0.15)] scale-[0.98]'
@@ -224,6 +261,46 @@ export const Dashboard: React.FC = () => {
                 >
                     FINALIZAR TURNO
                 </button>
+            )}
+
+            {/* Duration Selector Modal */}
+            {modalType && (
+                <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-[#1a1c23] border border-white/10 p-6 rounded-3xl shadow-2xl w-full max-w-sm relative animate-in slide-in-from-bottom-8">
+                        <button
+                            onClick={() => setModalType(null)}
+                            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors bg-white/5 p-1 rounded-full"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <div className="flex flex-col items-center text-center mb-6">
+                            <div className={`p-3 rounded-2xl mb-3 ${modalType === 'BREAK' ? 'bg-amber-500/20 text-amber-500' : 'bg-blue-500/20 text-blue-500'}`}>
+                                {modalType === 'BREAK' ? <Coffee size={32} /> : <Bed size={32} />}
+                            </div>
+                            <h2 className="text-white font-bold text-xl tracking-wide uppercase">
+                                Selecciona Duración
+                            </h2>
+                            <p className="text-gray-400 text-sm mt-1">El temporizador te avisará cuando puedas continuar la marcha.</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3">
+                            {modalType === 'BREAK' ? (
+                                <>
+                                    <button onClick={() => handleDurationSelect(45)} className="w-full py-4 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-400 font-bold rounded-xl transition-all">Pausa Completa (45 min)</button>
+                                    <button onClick={() => handleDurationSelect(30)} className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold rounded-xl transition-all">Pausa Fraccionaria (30 min)</button>
+                                    <button onClick={() => handleDurationSelect(15)} className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold rounded-xl transition-all">Pausa Fraccionaria (15 min)</button>
+                                </>
+                            ) : (
+                                <>
+                                    <button onClick={() => handleDurationSelect(11 * 60)} className="w-full py-4 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-400 font-bold rounded-xl transition-all">Descanso Normal (11h)</button>
+                                    <button onClick={() => handleDurationSelect(9 * 60)} className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold rounded-xl transition-all">Descanso Reducido (9h)</button>
+                                </>
+                            )}
+                            <button onClick={() => handleDurationSelect(0)} className="w-full py-3 mt-2 text-gray-500 text-sm font-bold uppercase transition-colors hover:text-white">Reloj Libre (Cuenta arriba)</button>
+                        </div>
+                    </div>
+                </div>
             )}
 
         </div>

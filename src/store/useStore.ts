@@ -6,8 +6,9 @@ interface CopilotState {
     currentActivity: ActivityType | null;
     activities: ActivitySegment[];
     currentShiftState: { compliance: ValidationResult } | null;
+    notifiedTimerIds: string[];
 
-    addBlock: (type: ActivityType) => void;
+    addBlock: (type: ActivityType, expectedDurationMins?: number) => void;
     stopCurrentActivity: () => void;
     removeLastBlock: () => void;
     endShift: (userId: string) => Promise<void>;
@@ -20,8 +21,9 @@ export const useStore = create<CopilotState>((set, get) => ({
     currentActivity: null,
     activities: [],
     currentShiftState: { compliance: { status: 'OK', message: 'Listo para conducir' } },
+    notifiedTimerIds: [],
 
-    addBlock: (type) => {
+    addBlock: (type, expectedDurationMins) => {
         const { currentActivity, stopCurrentActivity } = get();
 
         // Don't restart if already in this state
@@ -36,7 +38,8 @@ export const useStore = create<CopilotState>((set, get) => ({
             id: Date.now().toString(),
             type,
             startTime: Date.now(),
-            endTime: null
+            endTime: null,
+            expectedDurationMins
         };
 
         set({
@@ -138,9 +141,26 @@ export const useStore = create<CopilotState>((set, get) => ({
     },
 
     checkCompliance: () => {
-        const { currentActivity, activities, currentShiftState } = get();
+        const { currentActivity, activities, currentShiftState, notifiedTimerIds } = get();
         // Solo verificamos proactivamente si está conduciendo o en pausa, que son los estados medibles por la ley 561 para avisos a corto plazo.
         if (!currentActivity || activities.length === 0) return;
+
+        // CHECK TEMPORIZADOR INVERSO (Pausas y Descansos pautados)
+        const activeBlock = activities[activities.length - 1];
+        if (!activeBlock.endTime && activeBlock.expectedDurationMins) {
+            const elapsedMs = Date.now() - activeBlock.startTime;
+            const expectedMs = activeBlock.expectedDurationMins * 60000;
+
+            // Si el tiempo transcurrido superó el esperado Y aún no se le ha notificado
+            if (elapsedMs >= expectedMs && !notifiedTimerIds.includes(activeBlock.id)) {
+                // Alarma amistosa para temporizadores completados (tipo microondas o campana suave)
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(e => console.error("Alarm play prevented", e));
+
+                // Marcamos como notificado para no loopear el sonido cada segundo
+                set({ notifiedTimerIds: [...notifiedTimerIds, activeBlock.id] });
+            }
+        }
 
         const result = calculateContinuousDrive(activities, Date.now());
 

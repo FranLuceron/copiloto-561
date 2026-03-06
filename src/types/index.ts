@@ -5,6 +5,7 @@ export interface ActivitySegment {
     type: ActivityType;
     startTime: number; // timestamp
     endTime: number | null; // null if currently active
+    expectedDurationMins?: number; // Para temporizadores pautados inversos
 }
 
 export type ComplianceStatus = 'OK' | 'WARNING' | 'VIOLATION';
