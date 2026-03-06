@@ -3,7 +3,7 @@ import { useSimulationStore } from '../store/useSimulationStore';
 import { calculateContinuousDrive, calculateDailyDrive } from '../utils/rulesEngine';
 import type { ValidationResult, ActivityType, FrequentRoute } from '../types';
 import { TimelineRenderer } from '../components/TimelineRenderer';
-import { Sparkles, Info, Trash2, Play, Coffee, Briefcase, Bed, RefreshCcw, AlertTriangle, CheckCircle2, Save, Download } from 'lucide-react';
+import { Sparkles, Info, Trash2, Play, Coffee, Briefcase, Bed, RefreshCcw, AlertTriangle, CheckCircle2, Save, Download, Calculator, X } from 'lucide-react';
 import { auth } from '../services/firebase';
 import { shiftService } from '../services/shiftService';
 
@@ -13,8 +13,14 @@ export const Simulation: React.FC = () => {
     const [simDetails, setSimDetails] = useState('');
     const [violationBlockId, setViolationBlockId] = useState<string | null>(null);
     const [customMins, setCustomMins] = useState<number>(45);
+    const [customNote, setCustomNote] = useState<string>('');
     const [savedRoutes, setSavedRoutes] = useState<FrequentRoute[]>([]);
     const [isSaving, setIsSaving] = useState(false);
+
+    // Calculator States
+    const [showCalculator, setShowCalculator] = useState(false);
+    const [calcDistance, setCalcDistance] = useState<number | ''>('');
+    const [calcSpeed, setCalcSpeed] = useState<number | ''>(75);
 
     useEffect(() => {
         loadSavedRoutes();
@@ -122,10 +128,23 @@ export const Simulation: React.FC = () => {
         setSimDetails(finalDetails);
     };
 
-    const handleAddBlock = (type: ActivityType, mins: number) => {
+    const handleAddBlock = (type: ActivityType, mins: number, label?: string) => {
         if (mins > 0) {
-            addBlock(type, mins);
+            addBlock(type, mins, label);
+            setCustomNote(''); // Reset note after adding
         }
+    };
+
+    const handleCalculateDrive = () => {
+        if (calcDistance === '' || calcDistance <= 0 || calcSpeed === '' || calcSpeed <= 0) return;
+
+        const timeInHours = Number(calcDistance) / Number(calcSpeed);
+        const timeInMinutes = Math.round(timeInHours * 60);
+        const label = `${calcDistance} KM a ${calcSpeed} KM/H`;
+
+        handleAddBlock('DRIVE', timeInMinutes, label);
+        setShowCalculator(false);
+        setCalcDistance(''); // reset
     };
 
     const formatDuration = (mins: number) => {
@@ -254,6 +273,11 @@ export const Simulation: React.FC = () => {
                                     <div>
                                         <p className="text-white font-bold text-sm">
                                             {index + 1}. {getLabelForType(block.type)}
+                                            {block.customLabel && (
+                                                <span className="ml-2 text-[10px] bg-white/10 px-2 py-0.5 rounded-full text-gray-300 font-normal">
+                                                    {block.customLabel}
+                                                </span>
+                                            )}
                                         </p>
                                         <p className="text-gray-400 text-xs font-mono">
                                             {formatDuration(block.durationMins)}
@@ -276,32 +300,56 @@ export const Simulation: React.FC = () => {
 
             {/* Builder Controls */}
             <section className="bg-[var(--color-brand-card)] p-4 rounded-[var(--radius-luxury)] border border-[var(--color-brand-border)] animate-in slide-in-from-bottom-8">
-                <div className="flex items-center justify-between mb-4 bg-black/30 p-2 rounded-xl border border-white/5">
-                    <span className="text-xs text-gray-400 font-bold uppercase tracking-wider pl-2">Duración:</span>
-                    <div className="flex items-center">
+                <div className="flex flex-col gap-3 mb-4 bg-black/30 p-3 rounded-xl border border-white/5">
+                    <div className="flex items-center justify-between">
+                        <span className="text-xs text-gray-400 font-bold uppercase tracking-wider pl-1">Duración:</span>
+                        <div className="flex items-center">
+                            <input
+                                type="number"
+                                min="1"
+                                max="1440"
+                                value={customMins}
+                                onChange={(e) => setCustomMins(parseInt(e.target.value) || 0)}
+                                className="w-16 bg-transparent text-white font-mono text-center text-lg outline-none focus:text-blue-400 transition-colors border-b border-gray-600 focus:border-blue-400 mr-2"
+                            />
+                            <span className="text-xs text-gray-500 uppercase">min</span>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-white/5 pt-2 mt-1">
+                        <span className="text-xs text-gray-400 font-bold uppercase tracking-wider pl-1">Nota:</span>
                         <input
-                            type="number"
-                            min="1"
-                            max="1440"
-                            value={customMins}
-                            onChange={(e) => setCustomMins(parseInt(e.target.value) || 0)}
-                            className="w-16 bg-transparent text-white font-mono text-center text-lg outline-none focus:text-blue-400 transition-colors border-b border-gray-600 focus:border-blue-400 mr-2"
+                            type="text"
+                            maxLength={30}
+                            placeholder="Opcional..."
+                            value={customNote}
+                            onChange={(e) => setCustomNote(e.target.value)}
+                            className="flex-1 ml-4 bg-transparent text-white text-sm outline-none w-full text-right placeholder-gray-600 transition-colors border-b border-gray-600 focus:border-blue-400"
                         />
-                        <span className="text-xs text-gray-500 pr-2 uppercase">min</span>
                     </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                    <button
-                        onClick={() => handleAddBlock('DRIVE', customMins)}
-                        className="p-3 bg-[var(--color-state-drive)]/10 text-[var(--color-state-drive)] border border-[var(--color-state-drive)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-drive)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.05)] hover:shadow-[0_0_20px_rgba(16,185,129,0.15)]"
-                    >
-                        <Play size={24} />
-                        <span className="text-[10px] font-bold uppercase tracking-wider">Conducción</span>
-                    </button>
+                <div className="grid grid-cols-2 gap-3 relative">
+                    <div className="relative group">
+                        <button
+                            onClick={() => handleAddBlock('DRIVE', customMins, customNote || undefined)}
+                            className="w-full p-3 bg-[var(--color-state-drive)]/10 text-[var(--color-state-drive)] border border-[var(--color-state-drive)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-drive)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.05)] hover:shadow-[0_0_20px_rgba(16,185,129,0.15)]"
+                        >
+                            <Play size={24} />
+                            <span className="text-[10px] font-bold uppercase tracking-wider">Conducción</span>
+                        </button>
+
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setShowCalculator(true); }}
+                            className="absolute top-2 right-2 p-1.5 bg-black/40 text-emerald-400 rounded-lg border border-emerald-500/30 hover:bg-emerald-500/20 transition-all opacity-80 hover:opacity-100 backdrop-blur-sm"
+                            title="Calculador de Distancia"
+                        >
+                            <Calculator size={14} />
+                        </button>
+                    </div>
 
                     <button
-                        onClick={() => handleAddBlock('BREAK', customMins)}
+                        onClick={() => handleAddBlock('BREAK', customMins, customNote || undefined)}
                         className="p-3 bg-[var(--color-state-break)]/10 text-[var(--color-state-break)] border border-[var(--color-state-break)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-break)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(245,158,11,0.05)] hover:shadow-[0_0_20px_rgba(245,158,11,0.15)]"
                     >
                         <Coffee size={24} />
@@ -309,7 +357,7 @@ export const Simulation: React.FC = () => {
                     </button>
 
                     <button
-                        onClick={() => handleAddBlock('WORK', customMins)}
+                        onClick={() => handleAddBlock('WORK', customMins, customNote || undefined)}
                         className="p-3 bg-[var(--color-state-work)]/10 text-[var(--color-state-work)] border border-[var(--color-state-work)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-work)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(139,92,246,0.05)] hover:shadow-[0_0_20px_rgba(139,92,246,0.15)]"
                     >
                         <Briefcase size={24} />
@@ -317,7 +365,7 @@ export const Simulation: React.FC = () => {
                     </button>
 
                     <button
-                        onClick={() => handleAddBlock('REST', customMins)}
+                        onClick={() => handleAddBlock('REST', customMins, customNote || undefined)}
                         className="p-3 bg-[var(--color-state-rest)]/10 text-[var(--color-state-rest)] border border-[var(--color-state-rest)]/30 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-[var(--color-state-rest)]/20 transition-all active:scale-95 shadow-[0_0_15px_rgba(59,130,246,0.05)] hover:shadow-[0_0_20px_rgba(59,130,246,0.15)]"
                     >
                         <Bed size={24} />
@@ -329,6 +377,70 @@ export const Simulation: React.FC = () => {
             <div className="text-[10px] text-gray-500 uppercase tracking-widest text-center mt-2 flex items-center justify-center gap-1 font-bold">
                 <Info size={12} /> Estimación visual predictiva.
             </div>
+
+            {/* Calculator Modal */}
+            {showCalculator && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+                    <div className="bg-[#1a1c23] border border-white/10 p-6 rounded-2xl shadow-2xl w-full max-w-sm relative mt-safe">
+                        <button
+                            onClick={() => setShowCalculator(false)}
+                            className="absolute top-4 right-4 text-gray-500 hover:text-white transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <div className="flex items-center gap-3 mb-6">
+                            <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400">
+                                <Calculator size={24} />
+                            </div>
+                            <h2 className="text-white font-bold text-lg tracking-wide uppercase">Calculador de Viaje</h2>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-xs text-gray-400 uppercase tracking-wider font-bold mb-2">Distancia a recorrer (KM)</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    placeholder="Ej. 400"
+                                    value={calcDistance}
+                                    onChange={(e) => setCalcDistance(e.target.value ? parseInt(e.target.value) : '')}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-emerald-500/50 outline-none text-lg font-mono transition-colors"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-xs text-gray-400 uppercase tracking-wider font-bold mb-2">Velocidad Media (KM/H)</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="130"
+                                    value={calcSpeed}
+                                    onChange={(e) => setCalcSpeed(e.target.value ? parseInt(e.target.value) : '')}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-emerald-500/50 outline-none text-lg font-mono transition-colors"
+                                />
+                            </div>
+
+                            {calcDistance !== '' && calcDistance > 0 && calcSpeed !== '' && calcSpeed > 0 && (
+                                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center mt-2">
+                                    <p className="text-xs text-emerald-400/80 uppercase font-bold tracking-wider mb-1">Tiempo Estimado</p>
+                                    <p className="text-2xl font-mono text-emerald-400 font-bold">
+                                        {formatDuration(Math.round((Number(calcDistance) / Number(calcSpeed)) * 60))}
+                                    </p>
+                                </div>
+                            )}
+
+                            <button
+                                onClick={handleCalculateDrive}
+                                disabled={calcDistance === '' || calcDistance <= 0 || calcSpeed === '' || calcSpeed <= 0}
+                                className="w-full py-3 mt-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/50 active:scale-95 disabled:opacity-50 disabled:grayscale"
+                            >
+                                Añadir al Turno
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

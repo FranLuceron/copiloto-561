@@ -5,13 +5,14 @@ export interface SimulationBlock {
     id: string;
     type: ActivityType;
     durationMins: number; // Duration in minutes
+    customLabel?: string; // Etiqueta o nota personalizada (Ej: 400KM a 75KM/h)
 }
 
 interface SimulationState {
     blocks: SimulationBlock[];
 
     // Actions
-    addBlock: (type: ActivityType, durationMins: number) => void;
+    addBlock: (type: ActivityType, durationMins: number, customLabel?: string) => void;
     removeBlock: (id: string) => void;
     updateBlock: (id: string, durationMins: number) => void;
     clearBlocks: () => void;
@@ -24,11 +25,12 @@ interface SimulationState {
 export const useSimulationStore = create<SimulationState>((set, get) => ({
     blocks: [],
 
-    addBlock: (type, durationMins) => {
+    addBlock: (type, durationMins, customLabel) => {
         const newBlock: SimulationBlock = {
             id: Date.now().toString(), // Simple unique ID
             type,
-            durationMins
+            durationMins,
+            ...(customLabel && { customLabel })
         };
         set((state) => ({
             blocks: [...state.blocks, newBlock]
